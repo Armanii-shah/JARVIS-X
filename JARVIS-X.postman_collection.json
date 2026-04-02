@@ -1,0 +1,249 @@
+{
+  "info": {
+    "name": "JARVIS-X Backend",
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "description": "AI-powered email security backend - JARVIS-X",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    { "key": "alertId", "value": "", "type": "string" },
+    { "key": "emailId", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "id": "f1000001-0000-0000-0000-000000000001",
+      "item": [
+        {
+          "name": "Health Check",
+          "id": "f1000001-0000-0000-0000-000000000002",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Root",
+          "id": "f1000001-0000-0000-0000-000000000003",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/",
+              "host": ["{{baseUrl}}"],
+              "path": [""]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "id": "f2000002-0000-0000-0000-000000000001",
+      "item": [
+        {
+          "name": "Gmail OAuth - Login",
+          "id": "f2000002-0000-0000-0000-000000000002",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/gmail",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "gmail"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Gmail OAuth - Callback",
+          "id": "f2000002-0000-0000-0000-000000000003",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/gmail/callback?code=AUTH_CODE_HERE",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "gmail", "callback"],
+              "query": [
+                { "key": "code", "value": "AUTH_CODE_HERE" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Email",
+      "id": "f3000003-0000-0000-0000-000000000001",
+      "item": [
+        {
+          "name": "Scan Emails",
+          "id": "f3000003-0000-0000-0000-000000000002",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/email/scan",
+              "host": ["{{baseUrl}}"],
+              "path": ["email", "scan"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Email History",
+          "id": "f3000003-0000-0000-0000-000000000003",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/email/history",
+              "host": ["{{baseUrl}}"],
+              "path": ["email", "history"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Rescan Email",
+          "id": "f3000003-0000-0000-0000-000000000004",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/email/rescan/{{emailId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["email", "rescan", "{{emailId}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Alert",
+      "id": "f4000004-0000-0000-0000-000000000001",
+      "item": [
+        {
+          "name": "Trigger Alert",
+          "id": "f4000004-0000-0000-0000-000000000002",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": { "language": "json" }
+              },
+              "raw": "{\n  \"emailId\": \"test-123\",\n  \"score\": 85,\n  \"reason\": \"Phishing link detected\",\n  \"subject\": \"Urgent: Your account suspended\",\n  \"phone\": \"923265521790\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/alert/trigger",
+              "host": ["{{baseUrl}}"],
+              "path": ["alert", "trigger"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Alert History",
+          "id": "f4000004-0000-0000-0000-000000000003",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/alert/history",
+              "host": ["{{baseUrl}}"],
+              "path": ["alert", "history"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resolve Alert",
+          "id": "f4000004-0000-0000-0000-000000000004",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/alert/resolve/{{alertId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["alert", "resolve", "{{alertId}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "User",
+      "id": "f5000005-0000-0000-0000-000000000001",
+      "item": [
+        {
+          "name": "Get Profile",
+          "id": "f5000005-0000-0000-0000-000000000002",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/user/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["user", "profile"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Profile",
+          "id": "f5000005-0000-0000-0000-000000000003",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": { "language": "json" }
+              },
+              "raw": "{\n  \"phone\": \"923265521790\",\n  \"plan\": \"free\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/user/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["user", "profile"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
