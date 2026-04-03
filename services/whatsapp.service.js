@@ -1,4 +1,4 @@
-export async function sendWhatsAppAlert(phone, score, reason, subject) {
+export async function sendWhatsAppAlert(phone, score, reason, subject, threatLevel) {
   const url = `https://graph.facebook.com/v18.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
   console.log('WhatsApp API URL:', url);
@@ -17,7 +17,9 @@ export async function sendWhatsAppAlert(phone, score, reason, subject) {
       to: phone,
       type: 'text',
       text: {
-        body: `⚠️ JARVIS-X SECURITY ALERT\n\nThreat Detected!\nEmail: ${subject}\nRisk Score: ${score}/100\nReason: ${reason}\n\nTake immediate action!`,
+        body: threatLevel === 'MEDIUM'
+          ? `⚠️ JARVIS-X WARNING\n\nSuspicious Email Detected!\nEmail: ${subject}\nRisk Score: ${score}/100\nLevel: MEDIUM\nReason: ${reason}\n\nMonitor this email carefully.`
+          : `🚨 JARVIS-X SECURITY ALERT\n\nThreat Detected!\nEmail: ${subject}\nRisk Score: ${score}/100\nLevel: HIGH\nReason: ${reason}\n\nTake immediate action!`,
       },
     }),
   });

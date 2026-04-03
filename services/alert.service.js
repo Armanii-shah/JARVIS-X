@@ -20,12 +20,12 @@ async function sendEmailAlert(subject, score, reason) {
   });
 }
 
-export async function triggerAlert(userId, emailId, score, reason, subject, phone) {
+export async function triggerAlert(userId, emailId, score, reason, subject, phone, threatLevel) {
   let channel;
   let status = 'sent';
 
   try {
-    await sendWhatsAppAlert(phone, score, reason, subject);
+    await sendWhatsAppAlert(phone, score, reason, subject, threatLevel);
     channel = 'whatsapp';
   } catch (whatsappErr) {
     console.error('WhatsApp failed:', whatsappErr.message);
