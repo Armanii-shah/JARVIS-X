@@ -30,7 +30,7 @@ export async function triggerAlert(userId, emailId, score, reason, subject, phon
   } catch (whatsappErr) {
     console.error('WhatsApp failed:', whatsappErr.message);
     try {
-      await sendSMS(phone, `JARVIS-X ALERT: ${subject} Score: ${score}`);
+      await sendSMS(phone, subject, threatLevel);
       channel = 'sms';
     } catch (smsErr) {
       console.error('SMS failed:', smsErr.message);

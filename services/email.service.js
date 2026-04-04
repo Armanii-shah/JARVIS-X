@@ -39,3 +39,30 @@ export async function fetchNewEmails(userId) {
 
   return emails;
 }
+
+export async function markEmailAsRead(userId, messageId) {
+  const { data: user, error } = await supabase
+    .from('users')
+    .select('gmail_token')
+    .eq('id', userId)
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  const accessToken = decrypt(user.gmail_token);
+
+  const auth = new google.auth.OAuth2(
+    process.env.GMAIL_CLIENT_ID,
+    process.env.GMAIL_CLIENT_SECRET,
+    process.env.GMAIL_REDIRECT_URI
+  );
+  auth.setCredentials({ access_token: accessToken });
+
+  const gmail = google.gmail({ version: 'v1', auth });
+
+  await gmail.users.messages.modify({
+    userId: 'me',
+    id: messageId,
+    requestBody: { removeLabelIds: ['UNREAD'] },
+  });
+}

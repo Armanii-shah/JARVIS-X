@@ -4,8 +4,8 @@ import supabase from '../config/supabase.js';
 export async function trigger(req, res) {
   try {
     const userId = req.user?.id || 'test-user-id';
-    const { emailId, score, reason, subject, phone } = req.body;
-    const result = await triggerAlert(userId, emailId, score, reason, subject, phone);
+    const { emailId, score, reason, subject, phone, threatLevel } = req.body;
+    const result = await triggerAlert(userId, emailId, score, reason, subject, phone, threatLevel);
     res.json({ success: true, channel: result.channel });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

@@ -6,7 +6,7 @@ import { validate } from '../middleware/validate.middleware.js';
 
 const router = Router();
 
-router.use(authMiddleware);
+// router.use(authMiddleware);
 
 router.post('/trigger', [
   body('emailId').notEmpty().withMessage('emailId is required'),
