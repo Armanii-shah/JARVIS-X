@@ -3,7 +3,7 @@ import 'dotenv/config';
 // ── Startup env validation ─────────────────────────────────────────────────
 const REQUIRED_ENV = [
   'SUPABASE_URL',
-  'SUPABASE_ANON_KEY',
+  'SUPABASE_SERVICE_ROLE_KEY',
   'JWT_SECRET',
   'ENCRYPTION_KEY',
   'GMAIL_CLIENT_ID',
