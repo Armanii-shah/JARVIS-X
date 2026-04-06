@@ -17,17 +17,24 @@ export async function scanEmails(req, res) {
       parsed.body = cleanHtml(parsed.body);
 
       const virusTotalResult = await scanLinks(parsed.links);
-      const { score, threatLevel, reason } = await analyzeEmail(parsed);
+      const { score, reason } = await analyzeEmail(parsed);
       const decision = makeDecision(score);
+
+      const senderRaw = parsed.sender || '';
+      const senderEmailMatch = senderRaw.match(/<([^>]+)>/);
+      const senderEmail = senderEmailMatch ? senderEmailMatch[1] : senderRaw.trim();
+      const senderName = senderEmailMatch ? senderRaw.slice(0, senderRaw.indexOf('<')).trim() : null;
 
       const { data: emailRecord, error: emailError } = await supabase
         .from('emails')
         .insert({
           user_id: userId,
           subject: parsed.subject,
-          sender: parsed.sender,
-          score,
-          threat_level: decision.level,
+          sender_email: senderEmail,
+          sender_name: senderName,
+          risk_score: score,
+          threat_level: decision.level.toLowerCase(),
+          received_at: new Date().toISOString(),
           scanned_at: new Date().toISOString(),
         })
         .select('id')
@@ -90,9 +97,9 @@ export async function rescanEmail(req, res) {
 
     if (fetchError) throw new Error(fetchError.message);
 
-    const { score, threatLevel, reason } = await analyzeEmail({
+    const { score } = await analyzeEmail({
       subject: emailRecord.subject,
-      sender: emailRecord.sender,
+      sender: emailRecord.sender_email || '',
       body: '',
       links: [],
       attachments: [],
@@ -102,7 +109,7 @@ export async function rescanEmail(req, res) {
 
     const { error: updateError } = await supabase
       .from('emails')
-      .update({ score, threat_level: decision.level })
+      .update({ risk_score: score, threat_level: decision.level.toLowerCase() })
       .eq('id', emailId);
 
     if (updateError) throw new Error(updateError.message);
