@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
-import { getAuthUrl, getTokens } from '../services/gmail.service.js';
-import { encrypt } from '../utils/encrypt.util.js';
+import jwt from 'jsonwebtoken';
+import { getAuthUrl, getTokens, encryptTokenData } from '../services/gmail.service.js';
 import supabase from '../config/supabase.js';
 
 export async function gmailAuth(_req, res) {
@@ -28,18 +28,36 @@ export async function gmailCallback(req, res) {
     const { data } = await oauth2.userinfo.get();
     const email = data.email;
 
-    const encryptedToken = encrypt(tokens.access_token);
+    const encryptedToken = encryptTokenData(tokens); // stores both access_token + refresh_token
 
-    const { error } = await supabase.from('users').upsert({
+    const { error: upsertError } = await supabase.from('users').upsert({
       email,
       gmail_token: encryptedToken,
       plan: 'free',
     }, { onConflict: 'email' });
 
-    if (error) throw new Error(error.message);
+    if (upsertError) throw new Error(upsertError.message);
 
-    res.json({ success: true, email });
+    const { data: user, error: fetchError } = await supabase
+      .from('users')
+      .select('id')
+      .eq('email', email)
+      .single();
+
+    if (fetchError) throw new Error(fetchError.message);
+
+    const token = jwt.sign(
+      { userId: user.id, email },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.redirect(
+      `${process.env.FRONTEND_URL}/auth/callback?token=${token}&email=${encodeURIComponent(email)}`
+    );
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message, stack: error.stack });
+    console.error('Gmail callback error:', error.message);
+    // Never expose internal error details in the redirect URL
+    res.redirect(`${process.env.FRONTEND_URL}/auth/login?error=authentication_failed`);
   }
 }

@@ -1,6 +1,6 @@
 import { google } from 'googleapis';
 import supabase from '../config/supabase.js';
-import { decrypt } from '../utils/encrypt.util.js';
+import { createAuthClient } from './gmail.service.js';
 
 export async function fetchNewEmails(userId) {
   const { data: user, error } = await supabase
@@ -11,21 +11,13 @@ export async function fetchNewEmails(userId) {
 
   if (error) throw new Error(error.message);
 
-  const accessToken = decrypt(user.gmail_token);
-
-  const auth = new google.auth.OAuth2(
-    process.env.GMAIL_CLIENT_ID,
-    process.env.GMAIL_CLIENT_SECRET,
-    process.env.GMAIL_REDIRECT_URI
-  );
-  auth.setCredentials({ access_token: accessToken });
-
+  const auth = createAuthClient(user.gmail_token);
   const gmail = google.gmail({ version: 'v1', auth });
 
   const listRes = await gmail.users.messages.list({
     userId: 'me',
-    q: 'is:unread',
-    maxResults: 10,
+    q: 'newer_than:3d is:unread',
+    maxResults: 20,
   });
 
   const messages = listRes.data.messages || [];
@@ -49,15 +41,7 @@ export async function markEmailAsRead(userId, messageId) {
 
   if (error) throw new Error(error.message);
 
-  const accessToken = decrypt(user.gmail_token);
-
-  const auth = new google.auth.OAuth2(
-    process.env.GMAIL_CLIENT_ID,
-    process.env.GMAIL_CLIENT_SECRET,
-    process.env.GMAIL_REDIRECT_URI
-  );
-  auth.setCredentials({ access_token: accessToken });
-
+  const auth = createAuthClient(user.gmail_token);
   const gmail = google.gmail({ version: 'v1', auth });
 
   await gmail.users.messages.modify({

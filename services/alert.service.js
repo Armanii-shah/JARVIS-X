@@ -21,24 +21,41 @@ async function sendEmailAlert(subject, score, reason) {
 }
 
 export async function triggerAlert(userId, emailId, score, reason, subject, phone, threatLevel) {
+  console.log(`[Alert] triggerAlert called — userId: ${userId}, emailId: ${emailId}, score: ${score}, phone: ${phone ?? 'NOT SET'}`);
+
+  if (!phone) {
+    console.log(`[Alert] No phone number for user ${userId}, skipping WhatsApp/SMS alert`);
+    await supabase.from('alerts').insert({
+      email_id: emailId,
+      user_id: userId,
+      type: 'none',
+      status: 'failed',
+      triggered_at: new Date().toISOString(),
+    });
+    return { success: false, channel: 'none' };
+  }
+
   let channel;
   let status = 'sent';
 
   try {
     await sendWhatsAppAlert(phone, score, reason, subject, threatLevel);
     channel = 'whatsapp';
+    console.log(`[Alert] WhatsApp sent successfully to ${phone}`);
   } catch (whatsappErr) {
-    console.error('WhatsApp failed:', whatsappErr.message);
+    console.error('[Alert] WhatsApp failed:', whatsappErr.message);
     try {
       await sendSMS(phone, subject, threatLevel);
       channel = 'sms';
+      console.log(`[Alert] SMS sent successfully to ${phone}`);
     } catch (smsErr) {
-      console.error('SMS failed:', smsErr.message);
+      console.error('[Alert] SMS failed:', smsErr.message);
       try {
         await sendEmailAlert(subject, score, reason);
         channel = 'email';
+        console.log('[Alert] Email alert sent successfully');
       } catch (emailErr) {
-        console.error('Email failed:', emailErr.message);
+        console.error('[Alert] Email alert failed:', emailErr.message);
         status = 'failed';
         channel = 'none';
       }
@@ -53,5 +70,6 @@ export async function triggerAlert(userId, emailId, score, reason, subject, phon
     triggered_at: new Date().toISOString(),
   });
 
+  console.log(`[Alert] Alert recorded — channel: ${channel}, status: ${status}`);
   return { success: status !== 'failed', channel };
 }

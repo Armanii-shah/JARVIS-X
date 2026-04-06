@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { body } from 'express-validator';
-import { trigger, getHistory, resolve } from '../controllers/alert.controller.js';
+import { trigger, getHistory, markRead, markAllRead, deleteAlert, resolve } from '../controllers/alert.controller.js';
 import authMiddleware from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 
 const router = Router();
 
-// router.use(authMiddleware);
+router.use(authMiddleware);
 
 router.post('/trigger', [
   body('emailId').notEmpty().withMessage('emailId is required'),
@@ -16,7 +16,11 @@ router.post('/trigger', [
   body('phone').notEmpty().withMessage('phone is required').isLength({ min: 10 }).withMessage('phone must be at least 10 characters'),
   validate,
 ], trigger);
+
 router.get('/history', getHistory);
+router.patch('/mark-all-read', markAllRead);
+router.patch('/:id/read', markRead);
+router.delete('/:id', deleteAlert);
 router.patch('/resolve/:id', resolve);
 
 export default router;

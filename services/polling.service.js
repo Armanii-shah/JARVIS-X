@@ -5,111 +5,184 @@ import { makeDecision } from './decision.service.js';
 import { triggerAlert } from './alert.service.js';
 import { parseEmail } from '../utils/emailParser.util.js';
 import { cleanHtml } from '../utils/htmlCleaner.util.js';
-import { decrypt } from '../utils/encrypt.util.js';
+import { createAuthClient, refreshAccessToken } from './gmail.service.js';
 import supabase from '../config/supabase.js';
+
+async function processUser(user) {
+  console.log(`[Polling] Fetching emails for user: ${user.email}`);
+
+  let emails;
+  try {
+    emails = await fetchNewEmails(user.id);
+  } catch (err) {
+    const msg = err.message?.toLowerCase() || '';
+    const is401 = msg.includes('401') || msg.includes('invalid authentication') || msg.includes('unauthenticated');
+
+    if (!is401) throw err;
+
+    // Attempt token refresh
+    console.log(`[Polling] Token expired for ${user.email} — attempting refresh`);
+    const { data: stored } = await supabase.from('users').select('gmail_token').eq('id', user.id).single();
+
+    let newEncryptedToken;
+    try {
+      const refreshed = await refreshAccessToken(stored.gmail_token);
+      newEncryptedToken = refreshed.encryptedToken;
+    } catch (refreshErr) {
+      console.log(`[Polling] Token refresh failed for user: ${user.email} — ${refreshErr.message}`);
+      return;
+    }
+
+    // Save refreshed token
+    await supabase.from('users').update({ gmail_token: newEncryptedToken }).eq('id', user.id);
+    console.log(`[Polling] Token refreshed and saved for: ${user.email}`);
+
+    // Retry with new token
+    emails = await fetchNewEmails(user.id);
+  }
+
+  if (!emails || emails.length === 0) {
+    console.log(`[Polling] No new emails for: ${user.email}`);
+    return;
+  }
+
+  console.log(`[Polling] Fetched ${emails.length} email(s) for user: ${user.email}`);
+
+  // Create Gmail auth client once for the whole user session
+  const { data: userTokenRow } = await supabase
+    .from('users')
+    .select('gmail_token')
+    .eq('id', user.id)
+    .single();
+  const auth = createAuthClient(userTokenRow.gmail_token);
+  const gmail = google.gmail({ version: 'v1', auth });
+
+  for (const email of emails) {
+    try {
+      // Duplicate check
+      const { data: existing } = await supabase
+        .from('emails')
+        .select('id')
+        .eq('gmail_message_id', email.id)
+        .single();
+
+      if (existing) {
+        console.log(`[Polling] Already scanned (duplicate): ${email.id}`);
+        continue;
+      }
+
+      // Mark as read in Gmail IMMEDIATELY — before any processing or alerting.
+      // This prevents a concurrent poll from fetching the same email and firing a duplicate alert.
+      try {
+        await gmail.users.messages.modify({
+          userId: 'me',
+          id: email.id,
+          requestBody: { removeLabelIds: ['UNREAD'] },
+        });
+        console.log(`[Polling] Marked as read in Gmail: ${email.id}`);
+      } catch (markErr) {
+        console.error(`[Polling] Failed to mark as read in Gmail: ${markErr.message}`);
+      }
+
+      const parsed = parseEmail(email);
+      parsed.body = cleanHtml(parsed.body);
+
+      console.log(`[Polling] Analyzing email: "${parsed.subject}"`);
+
+      const analysis = await analyzeEmail(parsed);
+      const decision = makeDecision(analysis.score);
+
+      console.log(`[Polling] Score: ${analysis.score}, Level: ${analysis.threatLevel}, ShouldAlert: ${decision.shouldAlert}`);
+
+      // Insert email so we have a real email_id for the alert
+      const { data: insertedEmail, error: insertError } = await supabase
+        .from('emails')
+        .insert({
+          user_id: user.id,
+          gmail_message_id: email.id,
+          subject: parsed.subject,
+          sender: parsed.sender,
+          score: analysis.score,
+          threat_level: analysis.threatLevel,
+          scanned_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single();
+
+      if (insertError) {
+        console.error(`[Polling] Failed to insert email: ${insertError.message} — skipping alert to prevent duplicate`);
+        continue;
+      }
+
+      if (decision.shouldAlert) {
+        const phone = user.phone;
+        console.log(`[Polling] User phone: ${phone ?? 'NOT SET'}`);
+
+        if (!phone) {
+          console.log(`[Polling] No phone number for user ${user.email}, skipping alert`);
+        } else {
+          console.log(`[Polling] Triggering alert for: "${parsed.subject}"`);
+          await triggerAlert(
+            user.id,
+            insertedEmail?.id ?? null,
+            analysis.score,
+            analysis.reason,
+            parsed.subject,
+            phone,
+            analysis.threatLevel
+          );
+          console.log(`[Polling] Alert triggered successfully`);
+        }
+      }
+
+      console.log(`[Polling] Done — "${parsed.subject}" | Score: ${analysis.score} | Level: ${analysis.threatLevel}`);
+    } catch (err) {
+      console.error(`[Polling] Failed to process email for user ${user.email}:`, err.message);
+    }
+  }
+}
 
 export async function startPolling() {
   try {
     const { data: users, error } = await supabase
       .from('users')
-      .select('id, email')
+      .select('id, email, phone')
       .not('gmail_token', 'is', null);
 
     if (error) throw new Error(error.message);
 
+    console.log(`[Polling] Found ${users?.length ?? 0} user(s) with Gmail connected`);
+
     for (const user of users) {
       try {
-        const emails = await fetchNewEmails(user.id);
-        if (!emails || emails.length === 0) continue;
-
-        for (const email of emails) {
-          try {
-            const { data: existing } = await supabase
-              .from('emails')
-              .select('id')
-              .eq('gmail_message_id', email.id)
-              .single();
-
-            if (existing) {
-              console.log('Already scanned: ' + email.id);
-              continue;
-            }
-
-            const parsed = parseEmail(email);
-            parsed.body = cleanHtml(parsed.body);
-
-            const analysis = await analyzeEmail(parsed);
-            const decision = makeDecision(analysis.score);
-
-            if (decision.shouldAlert) {
-              const { data: userData } = await supabase
-                .from('users')
-                .select('phone')
-                .eq('id', user.id)
-                .single();
-
-              await triggerAlert(
-                user.id,
-                null,
-                analysis.score,
-                analysis.reason,
-                parsed.subject,
-                userData?.phone || '923265521790'
-              );
-            }
-
-            await supabase.from('emails').insert({
-              user_id: user.id,
-              gmail_message_id: email.id,
-              subject: parsed.subject,
-              sender: parsed.sender,
-              score: analysis.score,
-              threat_level: analysis.threatLevel,
-              scanned_at: new Date().toISOString(),
-            });
-
-            const { data: userToken } = await supabase
-              .from('users')
-              .select('gmail_token')
-              .eq('id', user.id)
-              .single();
-
-            const auth = new google.auth.OAuth2(
-              process.env.GMAIL_CLIENT_ID,
-              process.env.GMAIL_CLIENT_SECRET,
-              process.env.GMAIL_REDIRECT_URI
-            );
-            auth.setCredentials({ access_token: decrypt(userToken.gmail_token) });
-
-            const gmail = google.gmail({ version: 'v1', auth });
-            await gmail.users.messages.modify({
-              userId: 'me',
-              id: email.id,
-              requestBody: { removeLabelIds: ['UNREAD'] },
-            });
-            console.log('Marked as read: ' + email.id);
-
-            console.log('Email analyzed: ' + parsed.subject + ' Score: ' + analysis.score);
-          } catch (err) {
-            console.error('Failed to process email for user ' + user.id + ':', err.message);
-          }
-        }
+        await processUser(user);
       } catch (err) {
-        const msg = err.message?.toLowerCase() || '';
-        if (msg.includes('401') || msg.includes('invalid authentication') || msg.includes('unauthenticated')) {
-          console.log('Gmail token expired for user: ' + user.email + ' — skipping');
-          continue;
-        }
-        console.error('Error polling user ' + user.email + ':', err.message);
+        console.error(`[Polling] Error polling user ${user.email}:`, err.message);
       }
     }
   } catch (err) {
-    console.error('startPolling crashed:', err.message);
+    console.error('[Polling] startPolling crashed:', err.message);
   }
 }
 
 export function startPollingInterval() {
-  console.log('Email polling started - 30s interval');
-  const intervalId = setInterval(startPolling, 30000);
-  return intervalId;
+  let isPolling = false;
+
+  async function poll() {
+    if (isPolling) {
+      console.log('[Polling] Previous poll still running, skipping this cycle');
+      setTimeout(poll, 30000);
+      return;
+    }
+    isPolling = true;
+    try {
+      await startPolling();
+    } finally {
+      isPolling = false;
+      setTimeout(poll, 30000);
+    }
+  }
+
+  console.log('[Polling] Email polling started — 30s interval');
+  poll(); // run immediately on start, then every 30s after completion
 }

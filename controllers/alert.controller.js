@@ -14,15 +14,130 @@ export async function trigger(req, res) {
 
 export async function getHistory(req, res) {
   try {
-    const { data, error } = await supabase
+    const unreadOnly = req.query.unread === 'true';
+
+    let query = supabase
       .from('alerts')
       .select('*')
       .eq('user_id', req.user.id)
+      .neq('status', 'cleared')
       .order('triggered_at', { ascending: false });
 
-    if (error) throw new Error(error.message);
+    if (unreadOnly) {
+      query = query.neq('status', 'resolved');
+    }
 
-    res.json(data);
+    // Fetch alerts — exclude cleared ones
+    const { data: alertsData, error } = await query;
+
+    if (error) throw new Error(error.message);
+    if (!alertsData || alertsData.length === 0) return res.json([]);
+
+    // Manual join: fetch emails for alert.email_ids
+    const emailIds = [...new Set(alertsData.map(a => a.email_id).filter(Boolean))];
+    let emailsMap = {};
+
+    if (emailIds.length > 0) {
+      const { data: emailsData } = await supabase
+        .from('emails')
+        .select('id, subject, sender')
+        .in('id', emailIds);
+
+      emailsMap = Object.fromEntries((emailsData || []).map(e => [e.id, e]));
+    }
+
+    const normalized = alertsData.map(alert => {
+      const email = emailsMap[alert.email_id] || null;
+      const channel = alert.type || 'dashboard';
+      const isRead = alert.status === 'resolved';
+
+      const title = email?.subject
+        ? `High Risk Email: ${email.subject}`
+        : `Security Alert via ${channel.charAt(0).toUpperCase() + channel.slice(1)}`;
+
+      const message = email?.sender
+        ? `Suspicious email detected from ${email.sender}`
+        : `Alert delivered via ${channel}. Status: ${alert.status || 'sent'}`;
+
+      return {
+        id: alert.id,
+        user_id: alert.user_id,
+        threat_id: alert.email_id || null,
+        alert_type: channel,
+        title,
+        message,
+        is_sent: alert.status !== 'failed',
+        sent_at: alert.triggered_at,
+        is_read: isRead,
+        read_at: isRead ? alert.triggered_at : null,
+        created_at: alert.triggered_at,
+      };
+    });
+
+    res.json(normalized);
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+// Soft-delete: set status = 'cleared' (avoids Supabase RLS delete restrictions)
+export async function deleteAlert(req, res) {
+  try {
+    const { error } = await supabase
+      .from('alerts')
+      .update({ status: 'cleared' })
+      .eq('id', req.params.id)
+      .eq('user_id', req.user.id);
+
+    if (error) throw new Error(error.message);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+export async function markRead(req, res) {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id;
+
+    console.log('[Alert] Marking as read:', id, 'for user:', userId);
+
+    const { data, error } = await supabase
+      .from('alerts')
+      .update({ status: 'resolved' })
+      .eq('id', id)
+      .select();
+
+    console.log('[Alert] Update result - data:', data, 'error:', error);
+
+    if (error) {
+      console.error('[Alert] Mark read error:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    return res.json({ success: true, updated: data?.length });
+  } catch (error) {
+    console.error('[Alert] markRead exception:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+export async function markAllRead(req, res) {
+  try {
+    const userId = req.user.id;
+
+    const { data, error } = await supabase
+      .from('alerts')
+      .update({ status: 'resolved' })
+      .eq('user_id', userId)
+      .neq('status', 'resolved')
+      .neq('status', 'cleared')
+      .select('id');
+
+    if (error) return res.status(400).json({ success: false, message: error.message });
+
+    res.json({ success: true, count: data?.length ?? 0 });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -36,7 +151,6 @@ export async function resolve(req, res) {
       .eq('id', req.params.id);
 
     if (error) throw new Error(error.message);
-
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

@@ -1,4 +1,8 @@
 export async function sendWhatsAppAlert(phone, score, reason, subject, threatLevel) {
+  if (!phone || !/^\d{10,15}$/.test(String(phone))) {
+    throw new Error(`Invalid phone number format: ${phone}`);
+  }
+
   const url = `https://graph.facebook.com/v18.0/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
 
   console.log('WhatsApp API URL:', url);
@@ -24,10 +28,13 @@ export async function sendWhatsAppAlert(phone, score, reason, subject, threatLev
     }),
   });
 
-  const responseData = await res.json();
+  const responseData = await res.json().catch(() => ({}));
   console.log('WhatsApp API Response:', JSON.stringify(responseData));
 
-  if (res.ok) return { success: true };
+  if (!res.ok || responseData.error) {
+    const errMsg = responseData.error?.message ?? responseData.error ?? `HTTP ${res.status}`;
+    throw new Error(`WhatsApp API error: ${errMsg}`);
+  }
 
-  throw new Error(JSON.stringify(responseData));
+  return { success: true };
 }

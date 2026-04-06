@@ -10,8 +10,7 @@ router.use(authMiddleware);
 
 router.get('/profile', getProfile);
 router.patch('/profile', [
-  body('phone').optional().isLength({ min: 10 }).withMessage('phone must be at least 10 characters'),
-  body('plan').optional().isIn(['free', 'pro']).withMessage('plan must be free or pro'),
+  body('phone').optional().isLength({ min: 10, max: 15 }).withMessage('phone must be 10-15 digits'),
   validate,
 ], updateProfile);
 

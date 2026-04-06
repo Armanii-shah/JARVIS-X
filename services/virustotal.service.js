@@ -13,7 +13,8 @@ async function scanLink(url) {
   if (!submitRes.ok) throw new Error(`VT submit failed for ${url}: HTTP ${submitRes.status}`);
 
   const submitData = await submitRes.json();
-  const analysisId = submitData.data.id;
+  const analysisId = submitData?.data?.id;
+  if (!analysisId) throw new Error(`VT did not return analysis ID for ${url}`);
 
   await new Promise((resolve) => setTimeout(resolve, 2000));
 
@@ -24,17 +25,25 @@ async function scanLink(url) {
   if (!resultRes.ok) throw new Error(`VT result failed for ${url}: HTTP ${resultRes.status}`);
 
   const resultData = await resultRes.json();
-  const stats = resultData.data.attributes.stats;
+  const stats = resultData?.data?.attributes?.stats ?? {};
 
   return {
     url,
     malicious: stats.malicious ?? 0,
     suspicious: stats.suspicious ?? 0,
-    result: resultData.data.attributes.status,
+    result: resultData?.data?.attributes?.status ?? 'unknown',
   };
 }
 
 export async function scanLinks(links) {
   if (!links || links.length === 0) return [];
-  return Promise.all(links.map(scanLink));
+
+  // Use allSettled so one failing link doesn't discard all results
+  const results = await Promise.allSettled(links.map(scanLink));
+
+  return results.map((r, i) => {
+    if (r.status === 'fulfilled') return r.value;
+    console.error(`[VirusTotal] Failed to scan link ${links[i]}: ${r.reason?.message}`);
+    return { url: links[i], malicious: 0, suspicious: 0, result: 'scan_failed' };
+  });
 }
