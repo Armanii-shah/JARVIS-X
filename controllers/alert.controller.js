@@ -21,7 +21,7 @@ export async function getHistory(req, res) {
       .select('*')
       .eq('user_id', req.user.id)
       .neq('status', 'cleared')
-      .order('triggered_at', { ascending: false });
+      .order('created_at', { ascending: false });
 
     if (unreadOnly) {
       query = query.neq('status', 'resolved');
@@ -40,7 +40,7 @@ export async function getHistory(req, res) {
     if (emailIds.length > 0) {
       const { data: emailsData } = await supabase
         .from('emails')
-        .select('id, subject, sender')
+        .select('id, subject, sender_email, sender_name')
         .in('id', emailIds);
 
       emailsMap = Object.fromEntries((emailsData || []).map(e => [e.id, e]));
@@ -55,8 +55,9 @@ export async function getHistory(req, res) {
         ? `High Risk Email: ${email.subject}`
         : `Security Alert via ${channel.charAt(0).toUpperCase() + channel.slice(1)}`;
 
-      const message = email?.sender
-        ? `Suspicious email detected from ${email.sender}`
+      const senderDisplay = email?.sender_name || email?.sender_email || null;
+      const message = senderDisplay
+        ? `Suspicious email detected from ${senderDisplay}`
         : `Alert delivered via ${channel}. Status: ${alert.status || 'sent'}`;
 
       return {
@@ -67,10 +68,10 @@ export async function getHistory(req, res) {
         title,
         message,
         is_sent: alert.status !== 'failed',
-        sent_at: alert.triggered_at,
+        sent_at: alert.created_at,
         is_read: isRead,
-        read_at: isRead ? alert.triggered_at : null,
-        created_at: alert.triggered_at,
+        read_at: isRead ? alert.created_at : null,
+        created_at: alert.created_at,
       };
     });
 

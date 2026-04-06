@@ -20,18 +20,24 @@ async function sendEmailAlert(subject, score, reason) {
   });
 }
 
+async function saveAlert(emailId, userId, channel, status) {
+  const { error } = await supabase.from('alerts').insert({
+    email_id: emailId,
+    user_id: userId,
+    type: channel,
+    status,
+  });
+  if (error) {
+    console.error(`[Alert] Failed to save alert to DB: ${error.message}`);
+  }
+}
+
 export async function triggerAlert(userId, emailId, score, reason, subject, phone, threatLevel) {
   console.log(`[Alert] triggerAlert called — userId: ${userId}, emailId: ${emailId}, score: ${score}, phone: ${phone ?? 'NOT SET'}`);
 
   if (!phone) {
     console.log(`[Alert] No phone number for user ${userId}, skipping WhatsApp/SMS alert`);
-    await supabase.from('alerts').insert({
-      email_id: emailId,
-      user_id: userId,
-      type: 'none',
-      status: 'failed',
-      triggered_at: new Date().toISOString(),
-    });
+    await saveAlert(emailId, userId, 'none', 'failed');
     return { success: false, channel: 'none' };
   }
 
@@ -62,14 +68,7 @@ export async function triggerAlert(userId, emailId, score, reason, subject, phon
     }
   }
 
-  await supabase.from('alerts').insert({
-    email_id: emailId,
-    user_id: userId,
-    type: channel,
-    status,
-    triggered_at: new Date().toISOString(),
-  });
-
+  await saveAlert(emailId, userId, channel, status);
   console.log(`[Alert] Alert recorded — channel: ${channel}, status: ${status}`);
   return { success: status !== 'failed', channel };
 }
