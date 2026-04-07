@@ -44,6 +44,9 @@ import errorHandler from './middleware/errorHandler.middleware.js';
 
 const app = express();
 
+// Add this line near the top, after const app = express();
+app.set('trust proxy', 1); // Railway uses proxy
+
 // ── Security headers ───────────────────────────────────────────────────────
 app.use(helmet());
 
