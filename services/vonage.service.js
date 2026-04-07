@@ -26,7 +26,7 @@ export async function sendSMS(phone, message, threatLevel) {
   }
 
   if (responseData.messages[0].status !== '0') {
-    throw new Error(responseData.messages[0]['error-text']);
+    throw new Error(responseData.messages[0]['error-text'] || `Vonage error status: ${responseData.messages[0].status}`);
   }
 
   return { success: true };
