@@ -1,5 +1,7 @@
 export async function sendWhatsAppAlert(phone, score, reason, subject, threatLevel) {
-  if (!phone || !/^\d{10,15}$/.test(String(phone))) {
+  // Normalize: strip +, spaces, dashes — WhatsApp expects digits only (e.g. 923001234567)
+  const cleanPhone = String(phone).replace(/^\+/, '').replace(/[\s\-().]/g, '');
+  if (!cleanPhone || !/^\d{10,15}$/.test(cleanPhone)) {
     throw new Error(`Invalid phone number format: ${phone}`);
   }
 

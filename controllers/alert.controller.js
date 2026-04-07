@@ -30,18 +30,25 @@ export async function getHistory(req, res) {
     // Fetch alerts — exclude cleared ones
     const { data: alertsData, error } = await query;
 
-    if (error) throw new Error(error.message);
+    if (error) {
+      console.log('[Alert] getHistory Supabase error:', JSON.stringify(error));
+      throw new Error(error.message);
+    }
     if (!alertsData || alertsData.length === 0) return res.json([]);
 
-    // Manual join: fetch emails for alert.email_ids
+    // Manual join: fetch emails for alert.email_ids (optional — fails gracefully)
     const emailIds = [...new Set(alertsData.map(a => a.email_id).filter(Boolean))];
     let emailsMap = {};
 
     if (emailIds.length > 0) {
-      const { data: emailsData } = await supabase
+      const { data: emailsData, error: emailsError } = await supabase
         .from('emails')
-        .select('id, subject, sender_email, sender_name')
+        .select('id, subject, sender, score, threat_level, scanned_at')
         .in('id', emailIds);
+
+      if (emailsError) {
+        console.log('[Alert] emails join error (non-fatal):', JSON.stringify(emailsError));
+      }
 
       emailsMap = Object.fromEntries((emailsData || []).map(e => [e.id, e]));
     }
@@ -55,7 +62,7 @@ export async function getHistory(req, res) {
         ? `High Risk Email: ${email.subject}`
         : `Security Alert via ${channel.charAt(0).toUpperCase() + channel.slice(1)}`;
 
-      const senderDisplay = email?.sender_name || email?.sender_email || null;
+      const senderDisplay = email?.sender || null;
       const message = senderDisplay
         ? `Suspicious email detected from ${senderDisplay}`
         : `Alert delivered via ${channel}. Status: ${alert.status || 'sent'}`;

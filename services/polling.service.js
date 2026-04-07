@@ -59,11 +59,11 @@ async function processUser(user) {
 
   for (const email of emails) {
     try {
-      // Duplicate check — external_id stores the Gmail message ID
+      // Duplicate check — gmail_message_id stores the Gmail message ID
       const { data: existing } = await supabase
         .from('emails')
         .select('id')
-        .eq('external_id', email.id)
+        .eq('gmail_message_id', email.id)
         .single();
 
       if (existing) {
@@ -94,31 +94,18 @@ async function processUser(user) {
 
       console.log(`[Polling] Score: ${analysis.score}, Level: ${analysis.threatLevel}, ShouldAlert: ${decision.shouldAlert}`);
 
-      // Parse sender into name + email parts (format: "Name <email@domain.com>" or just "email@domain.com")
-      const senderRaw = parsed.sender || '';
-      const senderEmailMatch = senderRaw.match(/<([^>]+)>/);
-      const senderEmail = senderEmailMatch ? senderEmailMatch[1] : senderRaw.trim();
-      const senderName = senderEmailMatch ? senderRaw.slice(0, senderRaw.indexOf('<')).trim() : null;
-
-      // Extract received date from Gmail headers (internalDate is ms since epoch)
-      const receivedAt = email.internalDate
-        ? new Date(Number(email.internalDate)).toISOString()
-        : new Date().toISOString();
-
       console.log(`[DB] Attempting to insert email: "${parsed.subject}"`);
 
       const { data: insertedEmail, error: insertError } = await supabase
         .from('emails')
         .insert({
           user_id: user.id,
-          external_id: email.id,          // Gmail message ID → external_id
           subject: parsed.subject,
-          sender_email: senderEmail,      // was 'sender' — table uses sender_email
-          sender_name: senderName,        // table has separate sender_name column
-          risk_score: analysis.score,     // was 'score' — table uses risk_score
-          threat_level: analysis.threatLevel.toLowerCase(), // must be lowercase: low/medium/high
-          received_at: receivedAt,        // NOT NULL in table — was missing entirely
+          sender: parsed.sender || '',
+          score: analysis.score,
+          threat_level: analysis.threatLevel.toLowerCase(),
           scanned_at: new Date().toISOString(),
+          gmail_message_id: email.id,
         })
         .select('id')
         .single();
