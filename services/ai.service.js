@@ -15,7 +15,10 @@ export async function analyzeEmail(emailData) {
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-API-Key': process.env.PYTHON_API_KEY,
+        },
         body: JSON.stringify({ subject, sender, body, links, attachments }),
         signal: AbortSignal.timeout(20000), // 20s timeout per attempt
       });

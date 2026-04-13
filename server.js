@@ -11,6 +11,7 @@ const REQUIRED_ENV = [
   'GMAIL_REDIRECT_URI',
   'FRONTEND_URL',
   'PYTHON_SERVICE_URL',
+  'PYTHON_API_KEY',  // shared secret — backend proves identity to Python service
 ];
 
 const missing = REQUIRED_ENV.filter((k) => !process.env[k]);
@@ -39,8 +40,10 @@ import authRouter from './routes/auth.routes.js';
 import emailRouter from './routes/email.routes.js';
 import alertRouter from './routes/alert.routes.js';
 import userRouter from './routes/user.routes.js';
+import blockedRouter from './routes/blocked.routes.js';
 import { startPollingInterval } from './services/polling.service.js';
 import errorHandler from './middleware/errorHandler.middleware.js';
+import { requestIdMiddleware } from './middleware/requestId.middleware.js';
 
 const app = express();
 
@@ -88,6 +91,7 @@ if (process.env.NODE_ENV !== 'production') {
   app.use(morgan('dev'));
 }
 app.use(express.json({ limit: '1mb' }));
+app.use(requestIdMiddleware); // stamp every request with a correlation ID
 
 // ── Routes ─────────────────────────────────────────────────────────────────
 app.get('/', (_req, res) => {
@@ -107,6 +111,7 @@ app.use('/auth', authLimiter, authRouter);
 app.use('/email', apiLimiter, emailRouter);
 app.use('/alert', apiLimiter, alertRouter);
 app.use('/user', apiLimiter, userRouter);
+app.use('/blocked', apiLimiter, blockedRouter);
 
 app.use(errorHandler);
 

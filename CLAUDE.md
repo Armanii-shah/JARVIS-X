@@ -28,7 +28,7 @@ jarvis-x-backend/
 ├── routes/        → auth, email, alert, user
 ├── services/      → gmail, email, polling, ai, alert, whatsapp, vonage, virustotal, decision
 ├── middleware/    → auth.middleware.js
-├── utils/         → encrypt.util.js, htmlCleaner.util.js, linkExtractor.util.js, attachment.util.js
+├── utils/         → encrypt.util.js, htmlCleaner.util.js, emailParser.util.js
 └── server.js
 ```
 
@@ -40,9 +40,9 @@ Score > 60 = alert trigger
 SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, GMAIL_REDIRECT_URI,
 ENCRYPTION_KEY,
-WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_BUSINESS_ACCOUNT_ID,
+WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID,
 VONAGE_API_KEY, VONAGE_API_SECRET,
 VIRUSTOTAL_API_KEY,
-OPENAI_API_KEY,
-PYTHON_SERVICE_URL,
-PORT
+PYTHON_SERVICE_URL, PYTHON_API_KEY,
+FRONTEND_URL, ALLOWED_ORIGINS,
+PORT, NODE_ENV

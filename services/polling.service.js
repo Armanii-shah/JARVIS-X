@@ -59,31 +59,30 @@ async function processUser(user) {
 
   for (const email of emails) {
     try {
-      // Duplicate check — gmail_message_id stores the Gmail message ID
+      // Duplicate check — scope to this user (SECURITY FIX from previous patch).
       const { data: existing } = await supabase
         .from('emails')
         .select('id')
         .eq('gmail_message_id', email.id)
+        .eq('user_id', user.id)
         .single();
 
       if (existing) {
-        console.log(`[Polling] Already scanned (duplicate): ${email.id}`);
-        continue;
-      }
-
-      // Mark as read in Gmail IMMEDIATELY — before any processing or alerting.
-      // This prevents a concurrent poll from fetching the same email and firing a duplicate alert.
-      try {
+        // Email is already in our DB (processed successfully in a prior poll) but
+        // is still showing as unread in Gmail — this happens when mark-as-read
+        // failed or the process crashed after the insert. Clean it up now.
+        console.log(`[Polling] Already scanned (duplicate): ${email.id} — marking read in Gmail`);
         await gmail.users.messages.modify({
           userId: 'me',
           id: email.id,
           requestBody: { removeLabelIds: ['UNREAD'] },
-        });
-        console.log(`[Polling] Marked as read in Gmail: ${email.id}`);
-      } catch (markErr) {
-        console.error(`[Polling] Failed to mark as read in Gmail: ${markErr.message}`);
+        }).catch(err => console.error(`[Polling] Failed to mark duplicate as read: ${err.message}`));
+        continue;
       }
 
+      // ─── PARSE ────────────────────────────────────────────────────────────
+      // Do all fallible work (parse → AI → DB) BEFORE touching Gmail.
+      // If anything here throws, the email stays unread and the next poll retries it.
       const parsed = parseEmail(email);
       parsed.body = cleanHtml(parsed.body);
 
@@ -94,6 +93,7 @@ async function processUser(user) {
 
       console.log(`[Polling] Score: ${analysis.score}, Level: ${analysis.threatLevel}, ShouldAlert: ${decision.shouldAlert}`);
 
+      // ─── SAVE TO DATABASE ─────────────────────────────────────────────────
       console.log(`[DB] Attempting to insert email: "${parsed.subject}"`);
 
       const { data: insertedEmail, error: insertError } = await supabase
@@ -114,10 +114,31 @@ async function processUser(user) {
       console.log('[DB] Insert error:', JSON.stringify(insertError));
 
       if (insertError) {
-        console.error(`[Polling] Failed to insert email: ${insertError.message} — skipping alert to prevent duplicate`);
+        // Leave the email unread so the next poll can retry it.
+        console.error(`[Polling] DB insert failed for "${parsed.subject}": ${insertError.message} — email stays unread for retry`);
         continue;
       }
 
+      // ─── MARK AS READ IN GMAIL ────────────────────────────────────────────
+      // Data is safely persisted. Only now is it safe to remove UNREAD from Gmail.
+      // Transactional safety: the permanent side-effect (losing the email from
+      // the inbox) happens LAST, after every operation that can fail has succeeded.
+      // If this call fails, the email stays unread — next poll finds it via the
+      // duplicate check above and cleans it up without re-processing.
+      try {
+        await gmail.users.messages.modify({
+          userId: 'me',
+          id: email.id,
+          requestBody: { removeLabelIds: ['UNREAD'] },
+        });
+        console.log(`[Polling] Marked as read in Gmail: ${email.id}`);
+      } catch (markErr) {
+        // Non-fatal: the email is already saved. The duplicate-check path above
+        // will mark it read on the next poll cycle.
+        console.error(`[Polling] Failed to mark as read in Gmail (non-fatal, data saved): ${markErr.message}`);
+      }
+
+      // ─── TRIGGER ALERT ────────────────────────────────────────────────────
       if (decision.shouldAlert) {
         const phone = user.phone;
         console.log(`[Polling] User phone: ${phone ?? 'NOT SET'}`);

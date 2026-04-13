@@ -14,6 +14,7 @@ export async function gmailAuth(_req, res) {
 
 export async function gmailCallback(req, res) {
   try {
+    console.log(`[${req.id}] [Auth] Gmail OAuth callback received`);
     const { code } = req.query;
     const tokens = await getTokens(code);
 
@@ -56,7 +57,7 @@ export async function gmailCallback(req, res) {
       `${process.env.FRONTEND_URL}/auth/callback?token=${token}&email=${encodeURIComponent(email)}`
     );
   } catch (error) {
-    console.error('Gmail callback error:', error.message);
+    console.error(`[${req.id}] [Auth] Gmail callback error:`, error.message);
     // Never expose internal error details in the redirect URL
     res.redirect(`${process.env.FRONTEND_URL}/auth/login?error=authentication_failed`);
   }
