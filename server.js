@@ -41,7 +41,13 @@ import emailRouter from './routes/email.routes.js';
 import alertRouter from './routes/alert.routes.js';
 import userRouter from './routes/user.routes.js';
 import blockedRouter from './routes/blocked.routes.js';
+import paymentRouter from './routes/payment.routes.js';
+import contactRouter from './routes/contact.routes.js';
 import { startPollingInterval } from './services/polling.service.js';
+import { sendWhatsAppAlert } from './services/whatsapp.service.js';
+import { makeSecurityCall } from './services/twilio.service.js';
+import { triggerAlert } from './services/alert.service.js';
+import supabase from './config/supabase.js';
 import errorHandler from './middleware/errorHandler.middleware.js';
 import { requestIdMiddleware } from './middleware/requestId.middleware.js';
 
@@ -107,11 +113,130 @@ app.get('/health', (_req, res) => {
   });
 });
 
+app.get('/test-whatsapp', async (_req, res) => {
+  const testPhone = '923265521790';
+  console.log(`[TestWhatsApp] Firing test message to ${testPhone}`);
+  try {
+    const result = await sendWhatsAppAlert(
+      testPhone,
+      95,
+      'TEST: Simulated phishing attempt via JARVIS-X debug endpoint',
+      'TEST EMAIL — WhatsApp Debug',
+      'HIGH'
+    );
+    console.log('[TestWhatsApp] ✓ Success:', JSON.stringify(result));
+    res.json({ success: true, phone: testPhone, result });
+  } catch (err) {
+    console.error('[TestWhatsApp] ✗ Failed:', err.message);
+    res.status(500).json({ success: false, phone: testPhone, error: err.message });
+  }
+});
+
+
+// Fire WhatsApp + Voice call together — use ?level=medium|high|critical&phone=923xxxxxxxxx
+app.get('/test-alert', async (req, res) => {
+  const level = (req.query.level ?? 'high').toUpperCase();
+  const phone = req.query.phone ?? null;
+  const score = level === 'MEDIUM' ? 55 : level === 'CRITICAL' ? 98 : 85;
+  console.log(`[TestAlert] level=${level} score=${score} phone=${phone ?? 'NONE'}`);
+  try {
+    const result = await triggerAlert(
+      'test-user-id',
+      null,
+      score,
+      'TEST: Simulated phishing attempt via JARVIS-X debug endpoint',
+      'URGENT! Your account has been hacked - Pay now',
+      phone,
+      level,
+      'attacker@evil.com'
+    );
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('[TestAlert] ✗ Failed:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Shows last 5 alert records — tells us if triggerAlert was ever called
+app.get('/debug-alerts', async (_req, res) => {
+  const { data } = await supabase
+    .from('alerts')
+    .select('id, type, status, triggered_at, user_id, email_id')
+    .order('triggered_at', { ascending: false })
+    .limit(5);
+  res.json(data ?? []);
+});
+
+// Shows env config status (no secrets exposed) + user phones from DB
+app.get('/debug-config', async (_req, res) => {
+  const { data: users } = await supabase.from('users').select('id, email, phone').not('gmail_token', 'is', null);
+  res.json({
+    WHATSAPP_TOKEN: !!process.env.WHATSAPP_TOKEN,
+    WHATSAPP_PHONE_NUMBER_ID: !!process.env.WHATSAPP_PHONE_NUMBER_ID,
+    PYTHON_SERVICE_URL: process.env.PYTHON_SERVICE_URL ?? 'NOT SET',
+    users: users?.map(u => ({ email: u.email, phone: u.phone ?? 'NULL' })) ?? [],
+  });
+});
+
+app.get('/test-call', async (_req, res) => {
+  const testPhone = '923265521790';
+  console.log(`[TestCall] Making test call to ${testPhone}`);
+  try {
+    const result = await makeSecurityCall(
+      testPhone,
+      'TEST EMAIL — Twilio Voice Debug',
+      95
+    );
+    console.log('[TestCall] ✓ Success:', JSON.stringify(result));
+    res.json({ success: true, phone: testPhone, result });
+  } catch (err) {
+    console.error('[TestCall] ✗ Failed:', err.message);
+    res.status(500).json({ success: false, phone: testPhone, error: err.message });
+  }
+});
+
+// Re-fire alert for the most recent high/medium-risk email in DB
+// Use: GET /retrigger-latest?phone=923xxxxxxxxx
+app.get('/retrigger-latest', async (req, res) => {
+  const phone = req.query.phone ?? null;
+  try {
+    const { data: email, error } = await supabase
+      .from('emails')
+      .select('*')
+      .in('threat_level', ['high', 'medium'])
+      .order('scanned_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error || !email) {
+      return res.status(404).json({ success: false, message: 'No high/medium risk email found' });
+    }
+
+    console.log(`[RetriggerLatest] Re-alerting: "${email.subject}" score=${email.score} level=${email.threat_level} phone=${phone ?? 'NOT SET'}`);
+    const result = await triggerAlert(
+      email.user_id,
+      email.id,
+      email.score,
+      `Manual retrigger — score ${email.score}`,
+      email.subject || '(No Subject)',
+      phone,
+      email.threat_level,
+      email.sender || email.subject || '(Unknown)'
+    );
+    res.json({ success: result.success, channel: result.channel, email: email.subject, score: email.score });
+  } catch (err) {
+    console.error('[RetriggerLatest] Failed:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.use('/auth', authLimiter, authRouter);
 app.use('/email', apiLimiter, emailRouter);
 app.use('/alert', apiLimiter, alertRouter);
 app.use('/user', apiLimiter, userRouter);
 app.use('/blocked', apiLimiter, blockedRouter);
+app.use('/api/payment', apiLimiter, paymentRouter);
+app.use('/contact', apiLimiter, contactRouter);
 
 app.use(errorHandler);
 

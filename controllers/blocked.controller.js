@@ -29,6 +29,7 @@ export async function blockSender(req, res) {
     // Create a Gmail filter to route emails from this sender to spam
     let emailFilterId = null;
     try {
+      console.log('[Blocked] Creating Gmail filter for:', sender_email);
       const filterResponse = await gmail.users.settings.filters.create({
         userId: 'me',
         requestBody: {
@@ -37,10 +38,11 @@ export async function blockSender(req, res) {
         },
       });
       emailFilterId = filterResponse.data.id;
+      console.log('[Blocked] Gmail filter response:', JSON.stringify(filterResponse.data));
       console.log(`[Blocked] Gmail filter created: ${emailFilterId} for ${sender_email}`);
     } catch (gmailError) {
       // Log but don't fail — the block will still be recorded in DB
-      console.error(`[Blocked] Failed to create Gmail filter: ${gmailError.message}`);
+      console.error('[Blocked] Gmail filter FAILED:', gmailError.message, gmailError.response?.data);
     }
 
     // Insert into blocked_emails (ON CONFLICT DO NOTHING via Supabase upsert)
@@ -55,7 +57,38 @@ export async function blockSender(req, res) {
 
     if (insertError) throw new Error(insertError.message);
 
-    res.status(201).json({ success: true, blocked });
+    // Move existing inbox emails from this sender to spam
+    let movedToSpam = 0;
+    try {
+      const listRes = await gmail.users.messages.list({
+        userId: 'me',
+        q: `from:${sender_email} in:inbox`,
+        maxResults: 50,
+      });
+      const msgs = listRes.data.messages || [];
+      for (const msg of msgs) {
+        try {
+          await gmail.users.messages.modify({
+            userId: 'me',
+            id: msg.id,
+            requestBody: { addLabelIds: ['SPAM'], removeLabelIds: ['INBOX'] },
+          });
+          movedToSpam++;
+        } catch (moveErr) {
+          console.error(`[Blocked] Failed to move message ${msg.id} to spam: ${moveErr.message}`);
+        }
+      }
+      console.log(`[Blocked] Moved ${movedToSpam} past emails to spam for: ${sender_email}`);
+    } catch (spamErr) {
+      console.error('[Blocked] Failed to move past emails to spam:', spamErr.message);
+    }
+
+    res.status(201).json({
+      success: true,
+      data: blocked,
+      movedToSpam,
+      message: `Sender blocked + ${movedToSpam} past email${movedToSpam === 1 ? '' : 's'} moved to spam`,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -120,6 +153,48 @@ export async function unblockSender(req, res) {
       }
     }
 
+    // Optionally rescue emails from spam → inbox
+    let rescued = 0;
+    const shouldRescue = req.query.rescue === 'true';
+    if (shouldRescue && blockedRecord.sender_email) {
+      try {
+        const { data: userForRescue } = await supabase
+          .from('users')
+          .select('gmail_token')
+          .eq('id', userId)
+          .single();
+
+        if (userForRescue?.gmail_token) {
+          const rescueAuth = createAuthClient(userForRescue.gmail_token);
+          const rescueGmail = google.gmail({ version: 'v1', auth: rescueAuth });
+
+          // Search Gmail spam folder for emails from this sender
+          const searchRes = await rescueGmail.users.messages.list({
+            userId: 'me',
+            q: `from:${blockedRecord.sender_email} in:spam`,
+            maxResults: 50,
+          });
+
+          const msgs = searchRes.data.messages || [];
+          for (const msg of msgs) {
+            try {
+              await rescueGmail.users.messages.modify({
+                userId: 'me',
+                id: msg.id,
+                requestBody: { addLabelIds: ['INBOX'], removeLabelIds: ['SPAM'] },
+              });
+              rescued++;
+            } catch (moveErr) {
+              console.error(`[Blocked] Failed to move message ${msg.id} to inbox: ${moveErr.message}`);
+            }
+          }
+          console.log(`[Blocked] Rescued ${rescued} email(s) from spam for ${blockedRecord.sender_email}`);
+        }
+      } catch (rescueErr) {
+        console.error(`[Blocked] Rescue failed: ${rescueErr.message}`);
+      }
+    }
+
     // Delete from DB
     const { error: deleteError } = await supabase
       .from('blocked_emails')
@@ -129,7 +204,7 @@ export async function unblockSender(req, res) {
 
     if (deleteError) throw new Error(deleteError.message);
 
-    res.json({ success: true, message: 'Sender unblocked' });
+    res.json({ success: true, message: 'Sender unblocked', rescued });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }

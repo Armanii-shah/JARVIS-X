@@ -14,6 +14,7 @@ router.post('/trigger', [
   body('reason').notEmpty().withMessage('reason is required'),
   body('subject').notEmpty().withMessage('subject is required'),
   body('phone').notEmpty().withMessage('phone is required').isLength({ min: 10 }).withMessage('phone must be at least 10 characters'),
+  body('threatLevel').isIn(['LOW', 'MEDIUM', 'HIGH']).withMessage('threatLevel must be LOW, MEDIUM, or HIGH'),
   validate,
 ], trigger);
 

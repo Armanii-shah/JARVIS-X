@@ -1,74 +1,49 @@
 import { sendWhatsAppAlert } from './whatsapp.service.js';
-import { sendSMS } from './vonage.service.js';
-import nodemailer from 'nodemailer';
+import { makeSecurityCall } from './twilio.service.js';
 import supabase from '../config/supabase.js';
 
-async function sendEmailAlert(subject, score, reason) {
-  const transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      user: process.env.GMAIL_USER,
-      pass: process.env.GMAIL_APP_PASSWORD,
-    },
-  });
-
-  await transporter.sendMail({
-    from: process.env.GMAIL_USER,
-    to: process.env.ALERT_EMAIL,
-    subject: 'JARVIS-X SECURITY ALERT: ' + subject,
-    text: `Threat Detected!\nEmail: ${subject}\nRisk Score: ${score}/100\nReason: ${reason}\n\nTake immediate action!`,
-  });
-}
-
-async function saveAlert(emailId, userId, channel, status) {
+async function saveAlert(userId, emailId, channel, status) {
   const { error } = await supabase.from('alerts').insert({
-    email_id: emailId,
     user_id: userId,
+    email_id: emailId,
     type: channel,
-    status,
+    status: status,
+    triggered_at: new Date().toISOString(),
   });
-  if (error) {
-    console.error(`[Alert] Failed to save alert to DB: ${error.message}`);
-  }
+  if (error) console.error(`[Alert] Failed to save alert (${channel}): ${error.message}`);
 }
 
 export async function triggerAlert(userId, emailId, score, reason, subject, phone, threatLevel) {
-  console.log(`[Alert] triggerAlert called — userId: ${userId}, emailId: ${emailId}, score: ${score}, phone: ${phone ?? 'NOT SET'}`);
+  console.log(`[Alert] ======= triggerAlert CALLED =======`);
+  console.log(`[Alert] phone: ${phone ?? 'NOT SET'} | score: ${score} | level: ${threatLevel}`);
+  console.log(`[Alert] subject: "${subject}"`);
 
   if (!phone) {
-    console.log(`[Alert] No phone number for user ${userId}, skipping WhatsApp/SMS alert`);
-    await saveAlert(emailId, userId, 'none', 'failed');
+    console.log(`[Alert] No phone — skipping all channels`);
+    await saveAlert(userId, emailId, 'none', 'failed');
     return { success: false, channel: 'none' };
   }
 
-  let channel;
-  let status = 'sent';
+  // ── Fire WhatsApp + Voice call in parallel — completely independent ─────────
+  const [waResult, callResult] = await Promise.allSettled([
+    sendWhatsAppAlert(phone, score, reason, subject, threatLevel),
+    makeSecurityCall(phone, subject, score),
+  ]);
 
-  try {
-    await sendWhatsAppAlert(phone, score, reason, subject, threatLevel);
-    channel = 'whatsapp';
-    console.log(`[Alert] WhatsApp sent successfully to ${phone}`);
-  } catch (whatsappErr) {
-    console.error('[Alert] WhatsApp failed:', whatsappErr.message);
-    try {
-      await sendSMS(phone, subject, threatLevel);
-      channel = 'sms';
-      console.log(`[Alert] SMS sent successfully to ${phone}`);
-    } catch (smsErr) {
-      console.error('[Alert] SMS failed:', smsErr.message);
-      try {
-        await sendEmailAlert(subject, score, reason);
-        channel = 'email';
-        console.log('[Alert] Email alert sent successfully');
-      } catch (emailErr) {
-        console.error('[Alert] Email alert failed:', emailErr.message);
-        status = 'failed';
-        channel = 'none';
-      }
-    }
-  }
+  const waOk   = waResult.status   === 'fulfilled';
+  const callOk = callResult.status === 'fulfilled';
 
-  await saveAlert(emailId, userId, channel, status);
-  console.log(`[Alert] Alert recorded — channel: ${channel}, status: ${status}`);
-  return { success: status !== 'failed', channel };
+  console.log(`[WhatsApp] ${waOk   ? '✓ delivered'    : `✗ failed: ${waResult.reason?.message}`}`);
+  console.log(`[Twilio]   ${callOk ? '✓ call initiated' : `✗ failed: ${callResult.reason?.message}`}`);
+
+  // Persist each channel result independently
+  if (waOk)   await saveAlert(userId, emailId, 'whatsapp', 'sent');
+  if (callOk) await saveAlert(userId, emailId, 'call',     'sent');
+  if (!waOk && !callOk) await saveAlert(userId, emailId, 'none', 'failed');
+
+  const success  = waOk || callOk;
+  const channels = [waOk && 'whatsapp', callOk && 'call'].filter(Boolean).join('+') || 'none';
+
+  console.log(`[Alert] ── END — channels: ${channels} | success: ${success} ──`);
+  return { success, channel: channels };
 }

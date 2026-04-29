@@ -45,5 +45,12 @@ export async function analyzeEmail(emailData) {
     }
   }
 
-  throw new Error(`AI service unavailable after ${RETRY_DELAYS.length + 1} attempts: ${lastError?.message}`);
+  // AI service completely unreachable — return MEDIUM fallback so polling still
+  // saves the email and triggers an alert rather than silently dropping it.
+  console.warn(`[AI] All attempts failed — using fallback score 42 (MEDIUM). Last error: ${lastError?.message}`);
+  return {
+    score: 42,
+    threatLevel: 'MEDIUM',
+    reason: `AI service unavailable (${lastError?.message ?? 'unknown error'}) — scored MEDIUM by default. Review manually.`,
+  };
 }

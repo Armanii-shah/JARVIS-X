@@ -9,7 +9,7 @@ import { createAuthClient, refreshAccessToken } from './gmail.service.js';
 import supabase from '../config/supabase.js';
 
 async function processUser(user) {
-  console.log(`[Polling] Fetching emails for user: ${user.email}`);
+  console.log(`[Polling] ── processUser: ${user.email} | phone: ${user.phone ?? 'NOT SET IN DB'} ──`);
 
   let emails;
   try {
@@ -86,12 +86,35 @@ async function processUser(user) {
       const parsed = parseEmail(email);
       parsed.body = cleanHtml(parsed.body);
 
-      console.log(`[Polling] Analyzing email: "${parsed.subject}"`);
+      const senderRaw = parsed.sender || '';
+      const senderEmailMatch = senderRaw.match(/<([^>]+)>/);
+      const senderEmail = senderEmailMatch ? senderEmailMatch[1] : senderRaw.trim();
+      const senderName = senderEmailMatch ? senderRaw.slice(0, senderRaw.indexOf('<')).trim() : null;
 
-      const analysis = await analyzeEmail(parsed);
+      // Check if sender is blocked — score as 100 / high, skip AI
+      const { data: blockRecord } = await supabase
+        .from('blocked_emails')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('sender_email', senderEmail)
+        .maybeSingle();
+
+      let analysis;
+      if (blockRecord) {
+        console.log(`[Polling] Blocked sender detected: ${senderEmail} — scoring 100, skipping AI`);
+        analysis = { score: 100, threatLevel: 'high', reason: 'Sender is blocked by user' };
+      } else {
+        console.log(`[Polling] Analyzing email: "${parsed.subject}"`);
+        analysis = await analyzeEmail(parsed);
+      }
       const decision = makeDecision(analysis.score);
-
-      console.log(`[Polling] Score: ${analysis.score}, Level: ${analysis.threatLevel}, ShouldAlert: ${decision.shouldAlert}`);
+      const levelEmoji = decision.level === 'HIGH' ? '🔴' : decision.level === 'MEDIUM' ? '🟡' : '🟢';
+      console.log(`[Polling] ${levelEmoji} Score: ${analysis.score} | Level: ${decision.level} | ShouldAlert: ${decision.shouldAlert}`);
+      console.log(`[Polling] shouldAlert: ${decision.shouldAlert}`);
+      if (decision.shouldAlert) {
+        const alertLabel = decision.level === 'MEDIUM' ? '⚠️  MEDIUM RISK' : '🚨 HIGH RISK';
+        console.log(`[Polling] ${alertLabel} EMAIL — "${parsed.subject}" (score=${analysis.score})`);
+      }
 
       // ─── SAVE TO DATABASE ─────────────────────────────────────────────────
       console.log(`[DB] Attempting to insert email: "${parsed.subject}"`);
@@ -100,12 +123,15 @@ async function processUser(user) {
         .from('emails')
         .insert({
           user_id: user.id,
+          gmail_message_id: email.id,
           subject: parsed.subject,
           sender: parsed.sender || '',
+          sender_email: senderEmail,
+          sender_name: senderName,
           score: analysis.score,
           threat_level: analysis.threatLevel.toLowerCase(),
+          received_at: new Date().toISOString(),
           scanned_at: new Date().toISOString(),
-          gmail_message_id: email.id,
         })
         .select('id')
         .single();
@@ -140,24 +166,25 @@ async function processUser(user) {
 
       // ─── TRIGGER ALERT ────────────────────────────────────────────────────
       if (decision.shouldAlert) {
-        const phone = user.phone;
+        const phone = user.phone ?? null;
+        console.log(`[Polling] 🚨 HIGH RISK EMAIL — score: ${analysis.score}, level: ${analysis.threatLevel}, triggering alert`);
         console.log(`[Polling] User phone: ${phone ?? 'NOT SET'}`);
+        console.log(`[Polling] Alert check — user: ${user.email} | phone: ${phone ?? 'NOT SET'}`);
+        if (!phone) console.log('[Polling] No phone — all alert channels skipped');
 
-        if (!phone) {
-          console.log(`[Polling] No phone number for user ${user.email}, skipping alert`);
-        } else {
-          console.log(`[Polling] Triggering alert for: "${parsed.subject}"`);
-          await triggerAlert(
-            user.id,
-            insertedEmail?.id ?? null,
-            analysis.score,
-            analysis.reason,
-            parsed.subject,
-            phone,
-            analysis.threatLevel
-          );
-          console.log(`[Polling] Alert triggered successfully`);
-        }
+        console.log(`[Polling] Calling triggerAlert now...`);
+        const alertResult = await triggerAlert(
+          user.id,
+          insertedEmail?.id ?? null,
+          analysis.score,
+          analysis.reason,
+          parsed.subject,
+          phone,
+          analysis.threatLevel,
+          senderRaw || parsed.subject
+        );
+        console.log(`[Polling] triggerAlert result:`, JSON.stringify(alertResult));
+        console.log(`[Polling] Alert triggered successfully`);
       }
 
       console.log(`[Polling] Done — "${parsed.subject}" | Score: ${analysis.score} | Level: ${analysis.threatLevel}`);

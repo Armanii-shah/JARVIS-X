@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import jwt from 'jsonwebtoken';
 import { getAuthUrl, getTokens, encryptTokenData } from '../services/gmail.service.js';
+import { generateAuthCode, consumeAuthCode } from '../services/authCode.service.js';
 import supabase from '../config/supabase.js';
 
 export async function gmailAuth(_req, res) {
@@ -53,12 +54,24 @@ export async function gmailCallback(req, res) {
       { expiresIn: '7d' }
     );
 
-    res.redirect(
-      `${process.env.FRONTEND_URL}/auth/callback?token=${token}&email=${encodeURIComponent(email)}`
-    );
+    // Exchange code — short-lived (60s), single-use opaque code instead of
+    // putting the JWT directly in the URL (where it lands in browser history
+    // and server/proxy access logs).
+    const authCode = generateAuthCode(token, email);
+    res.redirect(`${process.env.FRONTEND_URL}/auth/callback?code=${authCode}`);
   } catch (error) {
     console.error(`[${req.id}] [Auth] Gmail callback error:`, error.message);
     // Never expose internal error details in the redirect URL
     res.redirect(`${process.env.FRONTEND_URL}/auth/login?error=authentication_failed`);
   }
+}
+
+export async function exchangeCode(req, res) {
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ success: false, message: 'code is required' });
+
+  const entry = consumeAuthCode(code);
+  if (!entry) return res.status(400).json({ success: false, message: 'Invalid or expired code' });
+
+  res.json({ success: true, token: entry.jwt, email: entry.email });
 }

@@ -1,6 +1,21 @@
+# Environment variables — NEVER commit these
 .env
-node_modules
-.DS_Store
-pnpm-lock.yaml
-CLAUDE.md
+.env.local
+.env.*.local
+.env.production
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+logs/
+
+# Docs (local only)
 BACKEND.md
+CLAUDE.md
+PAYMENT_SETUP.md
+
+# OS
+.DS_Store
+Thumbs.db
